@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Depot Ledger</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#16202a;--mute:#5c6b7a;--line:#e1e5ea;--brand:#0b6b57;--brand-ink:#fff;
+    --warn:#b45309;--bad:#b42318;--ok:#067647;--hi:#fde8e6;--md:#fef3c7;--lo:#e8f1fb}
+  @media (prefers-color-scheme:dark){:root{--bg:#10161c;--card:#18212a;--ink:#e8edf2;--mute:#92a1b0;--line:#2a3643;
+    --brand:#2fb394;--brand-ink:#06251d;--warn:#f5a524;--bad:#ff7b72;--ok:#4ade80;--hi:#3a1a18;--md:#3a2e10;--lo:#16283a}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+  header h1{font-size:17px;margin:0;flex:1} header small{color:var(--mute)}
+  nav{display:flex;gap:4px;overflow-x:auto;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+  nav button{white-space:nowrap;background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--mute);font:inherit;cursor:pointer}
+  nav button.on{background:var(--brand);color:var(--brand-ink);font-weight:600}
+  main{max-width:1100px;margin:0 auto;padding:16px}
+  .grid{display:grid;gap:12px}.g4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;overflow-x:auto}
+  .kpi .l{color:var(--mute);font-size:13px}.kpi .v{font-size:26px;font-weight:700}.kpi .s{color:var(--mute);font-size:12px}
+  h2{font-size:16px;margin:0 0 10px}h3{font-size:14px;margin:12px 0 6px;color:var(--mute)}
+  table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mute);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  label{display:block;font-size:13px;color:var(--mute);margin:8px 0 3px}
+  input,select,textarea,button.b{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%;min-height:40px}
+  button.b{background:var(--brand);color:var(--brand-ink);border:0;font-weight:600;cursor:pointer;width:auto;padding:9px 16px}
+  button.b.alt{background:none;color:var(--ink);border:1px solid var(--line)} button.b.bad{background:var(--bad);color:#fff}
+  button.sm{min-height:32px;padding:4px 10px;font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.row>*{flex:1;min-width:130px}.row>button{flex:0 0 auto}
+  .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600}
+  .HIGH{background:var(--hi);color:var(--bad)}.MEDIUM{background:var(--md);color:var(--warn)}.LOW{background:var(--lo);color:var(--mute)}
+  .POSTED,.CLOSED,.RECONCILED{background:var(--lo);color:var(--ok)}.PENDING_APPROVAL,.DRAFT,.OPEN,.IN_REVIEW,.TIMING{background:var(--md);color:var(--warn)}.REJECTED,.ESCALATED,.SHORT_PAID{background:var(--hi);color:var(--bad)}
+  #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;max-width:90vw;display:none;z-index:9}
+  #toast.err{background:var(--bad);color:#fff}
+  .login{max-width:380px;margin:8vh auto;padding:0 16px}.demo button{margin:3px 3px 0 0}
+  .mute{color:var(--mute)} .bar{height:8px;border-radius:4px;background:var(--lo);overflow:hidden}.bar i{display:block;height:100%;background:var(--brand)}
+  details{margin:4px 0} summary{cursor:pointer;color:var(--mute)} pre{white-space:pre-wrap;font-size:12px;margin:4px 0;background:var(--bg);padding:8px;border-radius:8px}
+  #offline{display:none;background:var(--md);color:var(--warn);padding:6px 16px;font-size:13px}
+  @media (max-width:560px){main{padding:12px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ksh=n=>'KSh '+Number(n||0).toLocaleString('en-KE',{maximumFractionDigits:0});
+const num=n=>Number(n).toLocaleString('en-KE',{maximumFractionDigits:3});
+let S={token:localStorage.getItem('tok')||'',me:null,meta:null,tab:null,cache:{}};
+
+function toast(msg,err){const t=$('#toast');t.textContent=msg;t.className=err?'err':'';t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display='none',err?6000:2600)}
+async function api(path,opts={}){
+  const r=await fetch(path,{method:opts.method||(opts.body?'POST':'GET'),headers:{'Content-Type':'application/json',Authorization:'Bearer '+S.token},body:opts.body?JSON.stringify(opts.body):undefined});
+  const j=await r.json().catch(()=>({error:'bad response'}));
+  if(r.status===401&&S.token){logout();throw new Error('Session expired')}
+  if(!r.ok)throw new Error(j.error||r.statusText);return j;
+}
+async function act(fn,okMsg){try{const r=await fn();if(okMsg)toast(okMsg);return r}catch(e){toast(e.message,true)}}
+
+/* ---------- offline queue: stock events keep a client-generated id so a replay can never post twice ---------- */
+const Q={get:()=>{try{return JSON.parse(localStorage.getItem('q')||'[]')}catch{return[]}},set:v=>{try{localStorage.setItem('q',JSON.stringify(v))}catch{}}};
+const uuid=()=>crypto.randomUUID?crypto.randomUUID().replace(/-/g,''):[...Array(32)].map(()=>Math.floor(Math.random()*16).toString(16)).join('');
+async function sendEvent(body){
+  try{return await api('/api/events',{body})}
+  catch(e){ if(e instanceof TypeError){const q=Q.get();q.push(body);Q.set(q);showOffline();toast('No connection: saved as PENDING on this device and will sync automatically.');return {status:'QUEUED'}} throw e }
+}
+async function flush(){
+  const q=Q.get();if(!q.length)return showOffline();const left=[];
+  for(const b of q){try{await api('/api/events',{body:b})}catch(e){if(e instanceof TypeError)left.push(b);else toast('Queued '+b.reference+' rejected: '+e.message,true)}}
+  Q.set(left);showOffline();if(!left.length&&q.length){toast('Offline transactions synced');render()}
+}
+function showOffline(){const n=Q.get().length,el=$('#offline');if(el){el.style.display=n?'block':'none';el.textContent=n+' transaction(s) pending sync on this device (not yet posted)'}}
+setInterval(flush,15000);addEventListener('online',flush);
+
+/* ---------- auth ---------- */
+function logout(){localStorage.removeItem('tok');S={token:'',me:null,meta:null,tab:null,cache:{}};render()}
+async function login(e){e.preventDefault();const f=new FormData(e.target);
+  const r=await act(()=>api('/api/login',{body:{employee_no:f.get('no'),pin:f.get('pin')}}));
+  if(r){S.token=r.token;localStorage.setItem('tok',r.token);S.me=null;render()}}
+function loginView(){return `<div class="login"><div class="card"><h2>Depot Ledger</h2><p class="mute">Sign in with your employee number and PIN.</p>
+<form onsubmit="login(event)"><label>Employee no.</label><input name="no" inputmode="numeric" autocomplete="username" required>
+<label>PIN</label><input name="pin" type="password" autocomplete="current-password" required><p><button class="b">Sign in</button></p></form>
+<details class="demo"><summary>Demo accounts (employee no. = PIN)</summary>
+${[['1001','Storekeeper'],['1002','Cashier'],['1003','Driver'],['1004','Manager'],['1005','Manager 2'],['1006','Accountant'],['1007','Auditor'],['1008','CEO'],['1009','Board'],['1010','Admin']].map(([n,r])=>`<button type="button" class="b alt sm" onclick="document.querySelector('[name=no]').value='${n}';document.querySelector('[name=pin]').value='${n.slice(-4)}'">${r} · ${n}</button>`).join('')}
+</details></div></div>`}
+
+/* ---------- shell ---------- */
+const TABS=[
+ ['dash','Dashboard',p=>p.has('dashboard.full')||p.has('dashboard.summary')],
+ ['stock','Stock',p=>true],
+ ['move','Move stock',p=>[...p].some(x=>x.startsWith('event:'))],
+ ['approvals','Approvals',p=>p.has('approve')],
+ ['counts','Stock counts',p=>p.has('count.open')||p.has('count.record')||p.has('count.recount')],
+ ['sales','Sales & cash',p=>p.has('order.create')||p.has('payment.record')||p.has('bank.import')||p.has('rules.run')],
+ ['cases','Investigations',p=>p.has('investigation.manage')],
+ ['audit','Audit trail',p=>p.has('audit.read')],
+];
+async function render(){
+  const app=$('#app');
+  if(!S.token){app.innerHTML=loginView();return}
+  try{ if(!S.me){S.me=await api('/api/me');S.meta=await api('/api/meta');S.perms=new Set(S.me.perms)} }catch(e){return}
+  const tabs=TABS.filter(t=>t[2](S.perms));if(!tabs.find(t=>t[0]===S.tab))S.tab=tabs[0]?.[0];
+  app.innerHTML=`<header><h1>Depot Ledger</h1><small>${esc(S.me.user.name)} · ${esc(S.me.roles.join(', '))}</small><button class="b alt sm" onclick="logout()">Sign out</button></header>
+  <div id="offline"></div>
+  <nav>${tabs.map(t=>`<button class="${t[0]===S.tab?'on':''}" onclick="S.tab='${t[0]}';render()">${t[1]}</button>`).join('')}</nav><main id="view">Loading…</main>`;
+  showOffline();
+  const v=VIEWS[S.tab];try{$('#view').innerHTML=await v();if(S.tab==='move')moveType($('select[name=t]')?.value)}catch(e){$('#view').innerHTML=`<div class="card">${esc(e.message)}</div>`}
+}
+const opt=(arr,key='id',label='name',blank)=>(blank?`<option value="">${blank}</option>`:'')+arr.map(x=>`<option value="${x[key]}">${esc(x[label])}</option>`).join('');
+const locOpt=(blank)=>opt(S.meta.locations,'id','name',blank), prodOpt=()=>opt(S.meta.products,'id','name');
+const pname=id=>S.meta.products.find(p=>p.id===id)?.name||id, lname=id=>S.meta.locations.find(l=>l.id===id)?.name||id;
+const uname=id=>S.meta.users.find(u=>u.id===id)?.name||id;
+
+/* ---------- views ---------- */
+const VIEWS={
+async dash(){
+  const d=await api('/api/dashboard'),k=d.kpis,full=d.view==='full';
+  const kp=(l,v,s)=>`<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const maxv=Math.max(1,...d.locations.map(l=>l.value));
+  return `<div class="grid g4">${kp('Inventory value',ksh(k.inventory_value),'At weighted-average cost')}
+   ${kp('Unresolved variance',ksh(k.unresolved_variance),'Pending investigation')}
+   ${kp('Stock count accuracy',k.count_accuracy_pct==null?'—':k.count_accuracy_pct+'%','Latest finalized count lines matching')}
+   ${kp('Open investigations',k.open_investigations,`High ${d.open_by_severity.HIGH} · Med ${d.open_by_severity.MEDIUM} · Low ${d.open_by_severity.LOW}`)}</div>
+  <div class="grid g2" style="margin-top:12px">
+   <div class="card"><h2>Stock value by location</h2>${d.locations.map(l=>`<div style="margin:8px 0"><div style="display:flex;justify-content:space-between"><span>${esc(l.name||l.type)}</span><b>${ksh(l.value)}</b></div><div class="bar"><i style="width:${100*l.value/maxv}%"></i></div></div>`).join('')}</div>
+   <div class="card"><h2>Control status</h2><table><tr><td>Awaiting second-person approval</td><td class="n"><b>${d.pending_approvals}</b></td></tr>
+    <tr><td>Open cases &lt; 7 days / 7–30 / &gt; 30</td><td class="n">${d.open_by_age['<7d']} / ${d.open_by_age['7-30d']} / ${d.open_by_age['>30d']}</td></tr>
+    <tr><td>Closed investigations</td><td class="n">${d.closed_investigations}</td></tr></table>
+    ${d.exposure_by_type?`<h3>Exposure by type</h3><table>${Object.entries(d.exposure_by_type).map(([t,a])=>`<tr><td>${esc(t.replace(/_/g,' '))}</td><td class="n">${ksh(a)}</td></tr>`).join('')||'<tr><td class="mute">None</td></tr>'}</table>`:''}</div></div>
+  ${full?`<div class="card" style="margin-top:12px"><h2>Where to investigate</h2>${d.investigations.length?`<table><tr><th>Severity</th><th>Type</th><th>What</th><th class="n">Amount</th><th class="n">Age</th></tr>${d.investigations.map(i=>`<tr><td><span class="pill ${i.severity}">${i.severity}</span></td><td>${esc(i.type.replace(/_/g,' '))}</td><td>${esc(i.summary)}</td><td class="n">${ksh(i.amount)}</td><td class="n">${i.age_days}d</td></tr>`).join('')}</table>`:'<p class="mute">No open cases.</p>'}</div>`:'<p class="mute">Board view: aggregates only. Employee-level detail is restricted.</p>'}`;
+},
+async stock(){
+  const b=await api('/api/balances');
+  return `<div class="grid g2">${b.map(l=>`<div class="card"><h2>${esc(l.name)} <span class="pill LOW">${l.location_type}</span></h2>${l.custodian_id?`<div class="mute">Custodian: ${esc(uname(l.custodian_id))}</div>`:''}
+   ${l.items.length?`<table><tr><th>Product</th><th class="n">Qty</th><th class="n">Value</th></tr>${l.items.map(i=>`<tr><td>${esc(i.product)}</td><td class="n">${num(i.qty)}</td><td class="n">${ksh(i.value)}</td></tr>`).join('')}</table>`:'<p class="mute">Empty</p>'}</div>`).join('')}</div>
+   <p class="mute">Balances are summed from the posted ledger; there is no editable stock number.</p>`;
+},
+async move(){
+  const types=['RECEIVE','TRANSFER','SALE','RETURN','DAMAGE','ADJUST_IN','ADJUST_OUT'].filter(t=>S.perms.has('event:'+t));
+  const ev=(await api('/api/events')).slice(0,15);
+  return `<div class="grid g2"><div class="card"><h2>New stock movement</h2>
+  <form onsubmit="submitMove(event)"><div class="row"><div><label>Type</label><select name="t" onchange="moveType(this.value)">${types.map(t=>`<option>${t}</option>`).join('')}</select></div>
+  <div><label>Reference (unique)</label><input name="ref" required></div></div>
+  <div class="row"><div id="f-from"><label>From</label><select name="from">${locOpt('—')}</select></div><div id="f-to"><label>To</label><select name="to">${locOpt('—')}</select></div></div>
+  <div class="row"><div><label>Product</label><select name="p">${prodOpt()}</select></div><div><label>Quantity (base units)</label><input name="q" type="number" step="any" min="0.001" required></div>
+  <div id="f-cost"><label>Unit cost</label><input name="cost" type="number" step="any" min="0"></div><div id="f-note"><label>Supplier-note qty</label><input name="note" type="number" step="any"></div></div>
+  <div class="row"><div><label>Trip ref (van loads, deliveries, returns)</label><input name="trip"></div><div><label>Reason (required for damage/adjust)</label><input name="reason"></div></div>
+  <p><button class="b">Submit</button></p></form></div>
+  <div class="card"><h2>Recent movements</h2>${evTable(ev)}</div></div>`;
+},
+async approvals(){
+  const ev=await api('/api/events?status=PENDING_APPROVAL');
+  return `<div class="card"><h2>Waiting for a second person</h2>${ev.length?ev.map(e=>`<div style="border-top:1px solid var(--line);padding:10px 0">
+   <b>${e.event_type} ${esc(e.reference)}</b> <span class="pill PENDING_APPROVAL">pending</span> · ${ksh(e.value)} · requested by ${esc(e.created_by_name)}<div class="mute">${esc(e.reason||'')}</div>
+   <table>${e.lines.map(l=>`<tr><td>${esc(l.product)}</td><td class="n">${num(l.quantity_base)}</td></tr>`).join('')}</table>
+   <div class="row"><input id="rs-${e.id}" placeholder="Reason (required to reject)"><button class="b sm" onclick="decide('${e.id}','APPROVED')">Approve & post</button><button class="b bad sm" onclick="decide('${e.id}','REJECTED')">Reject</button></div></div>`).join(''):'<p class="mute">Nothing waiting.</p>'}
+   <p class="mute">You cannot approve your own requests or stock you are custodian of.</p></div>`;
+},
+async counts(){
+  const cs=await api('/api/counts');
+  return `<div class="grid g2"><div class="card"><h2>Open a count</h2><p class="mute">Freezes the expected balance at this moment.</p>
+   <div class="row"><div><label>Location</label><select id="cl">${locOpt()}</select></div><button class="b" onclick="openCount()">Start count</button></div></div>
+   <div class="card"><h2>Counts</h2><table>${cs.map(c=>`<tr><td>${esc(lname(c.location_id))}</td><td>${c.cutoff_at.slice(0,16).replace('T',' ')}</td><td><span class="pill ${c.status==='OPEN'?'OPEN':'CLOSED'}">${c.status}</span></td><td><button class="b alt sm" onclick="showCount('${c.id}')">Open</button></td></tr>`).join('')||'<tr><td class="mute">No counts yet</td></tr>'}</table></div></div><div id="count" style="margin-top:12px"></div>`;
+},
+async sales(){
+  const p=S.perms,orders=p.has('order.create')||p.has('payment.record')?await api('/api/orders'):[];
+  const today=new Date().toISOString().slice(0,10);
+  return `<div class="grid g2">
+  ${p.has('order.create')?`<div class="card"><h2>New sale / invoice</h2><form onsubmit="newOrder(event)"><div class="row"><div><label>Invoice no.</label><input name="inv" required></div><div><label>Date</label><input name="d" type="date" value="${today}" required></div><div><label>Terms</label><select name="terms"><option>CASH</option><option>CREDIT</option></select></div></div>
+   <div class="row"><div><label>Product</label><select name="p">${prodOpt()}</select></div><div><label>Qty</label><input name="q" type="number" step="any" required></div><div><label>Unit price</label><input name="pr" type="number" step="any" required></div></div>
+   <div class="row"><div><label>Sold from (also posts stock out)</label><select name="from">${locOpt('— invoice only —')}</select></div></div><p><button class="b">Record sale</button></p></form></div>`:''}
+  ${p.has('payment.record')?`<div class="card"><h2>Record payment</h2><form onsubmit="newPay(event)"><label>Invoice</label><select name="o">${orders.map(o=>`<option value="${o.id}">${esc(o.invoice_no)} · ${ksh(o.total)} · ${o.status}</option>`).join('')}</select>
+   <div class="row"><div><label>Method</label><select name="m"><option>CASH</option><option>MPESA</option><option>BANK</option></select></div><div><label>Amount</label><input name="a" type="number" step="any" required></div><div><label>Reference</label><input name="r"></div></div><p><button class="b">Record payment</button></p></form></div>`:''}
+  ${p.has('bank.import')?`<div class="card"><h2>Import bank / M-Pesa rows</h2><form onsubmit="bankImport(event)"><label>Account</label><input name="acc" value="KCB-MAIN" required><label>One row per line: date,amount,reference</label><textarea name="rows" rows="4" placeholder="2026-10-01,15000,MPX123"></textarea><p><button class="b">Import</button></p></form><p class="mute">Re-importing the same row is detected and skipped.</p></div>`:''}
+  ${p.has('rules.run')?`<div class="card"><h2>Run reconciliation rules</h2><form onsubmit="runRules(event)"><div class="row"><div><label>Period start</label><input name="s" type="date" value="${today.slice(0,8)}01"></div><div><label>Period end</label><input name="e" type="date" value="${today}"></div><div><label>Delivery grace (hours)</label><input name="g" type="number" value="12"></div></div><p><button class="b">Run checks</button></p></form><div id="rules-out"></div></div>`:''}
+  </div>
+  ${orders.length?`<div class="card" style="margin-top:12px"><h2>Recent invoices</h2><table><tr><th>Invoice</th><th>Date</th><th>Terms</th><th class="n">Total</th><th>Status</th><th></th></tr>${orders.map(o=>`<tr><td>${esc(o.invoice_no)}</td><td>${o.order_date}</td><td>${o.payment_terms}</td><td class="n">${ksh(o.total)}</td><td>${o.status}</td><td>${o.status==='OPEN'&&S.perms.has('order.cancel')?`<button class="b alt sm" onclick="cancelOrder('${o.id}')">Cancel…</button>`:''}</td></tr>`).join('')}</table></div>`:''}`;
+},
+async cases(){
+  const cs=await api('/api/investigations');
+  return `<div class="card"><h2>Investigation cases</h2><p class="mute">Cases record variances and evidence. They are not findings; a person records the conclusion.</p>${cs.map(c=>`<div style="border-top:1px solid var(--line);padding:10px 0">
+   <span class="pill ${c.severity}">${c.severity}</span> <span class="pill ${c.status}">${c.status}</span> <b>${esc(c.variance_type.replace(/_/g,' '))}</b> · ${ksh(c.amount)}<div>${esc(c.summary)}</div>
+   ${c.assigned_to?`<div class="mute">Assigned: ${esc(uname(c.assigned_to))}</div>`:''}${c.resolution?`<div><b>Resolution:</b> ${esc(c.resolution)}</div>`:''}
+   <details><summary>Evidence</summary><pre>${esc(JSON.stringify(c.evidence,null,2))}</pre></details>
+   ${c.status!=='CLOSED'?`<div class="row"><select id="as-${c.id}">${opt(S.meta.users)}</select><button class="b alt sm" onclick="caseAct('${c.id}','assign',{assignee:$('#as-${c.id}').value})">Assign</button><button class="b alt sm" onclick="caseAct('${c.id}','escalate',{note:prompt('Escalation note')||''})">Escalate</button><button class="b sm" onclick="closeCase('${c.id}')">Close with resolution…</button></div>`:''}</div>`).join('')||'<p class="mute">No cases.</p>'}</div>`;
+},
+async audit(){
+  const a=await api('/api/audit');
+  return `<div class="card"><h2>Audit trail (latest 200, append-only)</h2><table><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr>${a.map(r=>`<tr><td>${r.timestamp.slice(0,19).replace('T',' ')}</td><td>${esc(r.actor_id?uname(r.actor_id):'system')}</td><td>${esc(r.action)}</td><td class="mute">${esc((r.detail||'').slice(0,160))}</td></tr>`).join('')}</table></div>`;
+}};
+
+const evTable=ev=>`<table><tr><th>Ref</th><th>Type</th><th>Status</th><th class="n">Value</th><th></th></tr>${ev.map(e=>`<tr><td>${esc(e.reference)}<div class="mute">${esc(e.created_by_name||'')}</div></td><td>${e.event_type}</td><td><span class="pill ${e.status}">${e.status.replace('_',' ')}</span></td><td class="n">${ksh(e.value)}</td>
+ <td>${e.status==='POSTED'&&e.event_type!=='REVERSAL'&&S.perms.has('event:REVERSAL')?`<button class="b alt sm" onclick="reverse('${e.id}')">Reverse…</button>`:''}</td></tr>`).join('')}</table>`;
+
+/* ---------- actions ---------- */
+function moveType(t){const need={from:['TRANSFER','SALE','RETURN','DAMAGE','ADJUST_OUT'],to:['RECEIVE','TRANSFER','RETURN','DAMAGE','ADJUST_IN']};
+  const sh=(id,on)=>{const e=$(id);if(e)e.style.display=on?'':'none'};
+  sh('#f-from',need.from.includes(t));sh('#f-to',need.to.includes(t));sh('#f-cost',t==='RECEIVE');sh('#f-note',t==='RECEIVE')}
+async function submitMove(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));const t=f.t;
+  const line={product_id:f.p,quantity:+f.q};
+  if(t==='RECEIVE'){ if(f.cost)line.unit_cost=+f.cost; if(f.note!=='')line.note_qty=+f.note;
+    const r=await act(()=>api('/api/receive',{body:{reference:f.ref,to_location:f.to,lines:[line]}}));
+    if(r){toast(r.status==='POSTED'?'Received and posted':'Received: waiting for approval');render()}return}
+  const body={event_id:uuid(),event_type:t,reference:f.ref,lines:[line],from_location:f.from||null,to_location:f.to||null,trip_ref:f.trip,reason:f.reason};
+  const r=await act(()=>sendEvent(body));if(r){if(r.status!=='QUEUED')toast(r.status==='POSTED'?'Posted':'Submitted: '+r.status.replace('_',' ').toLowerCase());render()}}
+async function decide(id,d){const reason=$('#rs-'+id).value;const r=await act(()=>api(`/api/events/${id}/decide`,{body:{decision:d,reason}}),d==='APPROVED'?'Approved and posted':'Rejected');if(r)render()}
+async function reverse(id){const reason=prompt('Reason for reversal (creates a linked correction that needs approval):');if(!reason)return;
+  const r=await act(()=>api(`/api/events/${id}/reverse`,{body:{reason}}),'Reversal submitted for approval');if(r)render()}
+async function openCount(){const r=await act(()=>api('/api/counts',{body:{location_id:$('#cl').value}}));if(r){await render();showCount(r.id)}}
+async function showCount(id){const c=await api('/api/counts/'+id);const open=c.count.status==='OPEN';
+  $('#count').innerHTML=`<div class="card"><h2>Count: ${esc(lname(c.count.location_id))} <span class="pill ${open?'OPEN':'CLOSED'}">${c.count.status}</span></h2>
+  <table><tr><th>Product</th><th class="n">Expected</th><th class="n">Counted</th><th class="n">Recount</th><th class="n">Variance</th><th></th></tr>${c.lines.map(l=>`<tr><td>${esc(l.product)}</td><td class="n">${num(l.expected_qty)}</td><td class="n">${l.counted_qty==null?'—':num(l.counted_qty)}</td><td class="n">${l.recount_qty==null?'—':num(l.recount_qty)}</td><td class="n">${l.variance==null?'—':num(l.variance)}</td>
+  <td>${open?(l.counted_qty==null&&S.perms.has('count.record')?`<button class="b sm" onclick="countQty('${id}','${l.product_id}','record')">Count</button>`:l.counted_qty!=null&&S.perms.has('count.recount')?`<button class="b alt sm" onclick="countQty('${id}','${l.product_id}','recount')">Recount</button>`:''):(l.variance?`<button class="b alt sm" onclick="adjust('${id}','${l.product_id}')">Propose adjustment</button>`:'')}</td></tr>`).join('')}</table>
+  ${open&&S.perms.has('count.open')?`<p><button class="b" onclick="finalize('${id}')">Finalize count</button> <span class="mute">Variances open investigation cases. Original counts are preserved.</span></p>`:''}</div>`}
+async function countQty(id,pid,kind){const q=prompt(kind==='record'?'Counted quantity:':'Recount quantity (must be a different person from the counter):');if(q===null||q==='')return;
+  const r=await act(()=>api(`/api/counts/${id}/${kind}`,{body:{product_id:pid,qty:+q}}),'Saved');if(r)showCount(id)}
+async function finalize(id){const t=prompt('Tolerance in units (0 = exact)','0');if(t===null)return;const r=await act(()=>api(`/api/counts/${id}/finalize`,{body:{tolerance:+t}}));if(r){toast(`Finalized: ${r.investigations.length} case(s) opened`);showCount(id)}}
+async function adjust(id,pid){const reason=prompt('Reason for adjustment (a second person must approve):');if(!reason)return;const r=await act(()=>api(`/api/counts/${id}/adjust`,{body:{product_id:pid,reason}}),'Adjustment submitted for approval');if(r)showCount(id)}
+async function newOrder(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
+  const r=await act(()=>api('/api/orders',{body:{invoice_no:f.inv,order_date:f.d,terms:f.terms,lines:[{product_id:f.p,quantity:+f.q,unit_price:+f.pr}]}}));
+  if(!r)return;if(f.from){await act(()=>sendEvent({event_id:uuid(),event_type:'SALE',reference:f.inv+'-S',lines:[{product_id:f.p,quantity:+f.q}],from_location:f.from}),'Sale recorded and stock posted')}else toast('Invoice recorded');render()}
+async function newPay(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));const r=await act(()=>api(`/api/orders/${f.o}/payments`,{body:{method:f.m,amount:+f.a,reference:f.r}}),'Payment recorded');if(r)render()}
+async function cancelOrder(id){const reason=prompt('Reason for cancelling this sale:');if(!reason)return;const r=await act(()=>api(`/api/orders/${id}/cancel`,{body:{reason}}),'Sale cancelled (audited). Reverse its stock movement under Move stock → Reverse.');if(r!==undefined)render()}
+async function bankImport(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
+  const rows=f.rows.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>{const[d,a,...r]=x.split(',');return{date:d.trim(),amount:+a,reference:r.join(',').trim()}});
+  const r=await act(()=>api('/api/bank/import',{body:{account:f.acc,rows}}));if(r)toast(`${r.added} added, ${r.duplicates.length} duplicate(s) skipped`)}
+async function runRules(e){e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
+  const r=await act(()=>api('/api/rules/run',{body:{period_start:f.s,period_end:f.e,grace_hours:+f.g}}));if(!r)return;const t=r.sales_to_cash?.totals||{};
+  $('#rules-out').innerHTML=`<table><tr><td>Unreconciled deliveries (cases)</td><td class="n">${r.unreconciled_deliveries}</td></tr><tr><td>Unusual adjustments</td><td class="n">${r.unusual_adjustments}</td></tr><tr><td>Repeated patterns</td><td class="n">${r.repeated_anomalies}</td></tr>
+  <tr><td>Expected cash / collected by period end</td><td class="n">${ksh(t.expected_cash)} / ${ksh(t.collected_by_period_end)}</td></tr><tr><td>Timing (paid after period)</td><td class="n">${ksh(t.timing_receivable)}</td></tr><tr><td>Credit receivable</td><td class="n">${ksh(t.credit_receivable)}</td></tr><tr><td>Mismatch (investigate)</td><td class="n"><b>${ksh(t.mismatch)}</b></td></tr></table>`}
+async function caseAct(id,a,body){const r=await act(()=>api(`/api/investigations/${id}/${a}`,{body}),'Updated');if(r)render()}
+async function closeCase(id){const resolution=prompt('Written resolution (what the evidence showed):');if(!resolution)return;const ok=confirm('Is the explanation supported by the evidence?');await caseAct(id,'close',{resolution,explanation_supported:ok})}
+
+render();flush();
+</script>
+</body>
+</html>
